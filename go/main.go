@@ -1067,22 +1067,41 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 	conditions := []IsuCondition{}
 	var err error
 
+	sql := "SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ?"+
+		"	AND `timestamp` < ?"
+	args := []interface{}{jiaIsuUUID, endTime}
+
 	if startTime.IsZero() {
-		err = db.Select(&conditions,
-			"SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ?"+
-				"	AND `timestamp` < ?"+
-				"	ORDER BY `timestamp` DESC",
-			jiaIsuUUID, endTime,
-		)
-	} else {
-		err = db.Select(&conditions,
-			"SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ?"+
-				"	AND `timestamp` < ?"+
-				"	AND ? <= `timestamp`"+
-				"	ORDER BY `timestamp` DESC",
-			jiaIsuUUID, endTime, startTime,
-		)
+		sql += "	AND ? <= `timestamp`"
+		args = append(args, startTime)
 	}
+
+	if len(conditionLevel) > 0 {
+		sql += "	AND condition_level IN ("
+
+		tmp := ""
+		if _, ok := conditionLevel["info"]; ok {
+			tmp += "?,"
+			args = append(args, 0)
+		}
+		if _, ok := conditionLevel["warning"]; ok {
+			tmp += "?,"
+			args = append(args, 1)
+		}
+		if _, ok := conditionLevel["critical"]; ok {
+			tmp += "?,"
+			args = append(args, 2)
+		}
+		tmp = tmp[:len(tmp)-1]
+
+		sql += tmp + ") "
+	}
+
+	sql += "	ORDER BY `timestamp` DESC LIMIT ?"
+	args = append(args, limit)
+
+	err = db.Select(&conditions, sql, args)
+
 	if err != nil {
 		return nil, fmt.Errorf("db error: %v", err)
 	}
@@ -1106,10 +1125,6 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 			}
 			conditionsResponse = append(conditionsResponse, &data)
 		}
-	}
-
-	if len(conditionsResponse) > limit {
-		conditionsResponse = conditionsResponse[:limit]
 	}
 
 	return conditionsResponse, nil
