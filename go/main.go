@@ -1164,7 +1164,7 @@ func calculateConditionLevel(condition IsuCondition) (int, error) {
 	case 3:
 		conditionLevel = conditionLevelCritical
 	default:
-		return "", fmt.Errorf("unexpected warn count")
+		return 0, fmt.Errorf("unexpected warn count")
 	}
 
 	return conditionLevel, nil
