@@ -560,7 +560,10 @@ func getIsuList(c echo.Context) error {
 	}
 
 	latestIsuConditionCacheMutex.RLock()
-	copiedLatestIsuConditionCache := latestIsuConditionCache
+	copiedLatestIsuConditionCache := map[string]IsuCondition{}
+	for k,v := range latestIsuConditionCache {
+		copiedLatestIsuConditionCache[k] = v
+	}
 	latestIsuConditionCacheMutex.RUnlock()
 
 	isuList := []Isu{}
