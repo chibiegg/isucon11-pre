@@ -559,6 +559,10 @@ func getIsuList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
+	latestIsuConditionCacheMutex.RLock()
+	copiedLatestIsuConditionCache := latestIsuConditionCache
+	latestIsuConditionCacheMutex.RUnlock()
+
 	isuList := []Isu{}
 	err = db.Select(
 		&isuList,
@@ -568,14 +572,11 @@ func getIsuList(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-
-	latestIsuConditionCacheMutex.RLock()
-
 	responseList := []GetIsuListResponse{}
 	for _, isu := range isuList {
 		var lastCondition IsuCondition
 
-		_, foundLastCondition := latestIsuConditionCache[isu.JIAIsuUUID]
+		_, foundLastCondition := copiedLatestIsuConditionCache[isu.JIAIsuUUID]
 
 		var formattedCondition *GetIsuConditionResponse
 		if foundLastCondition {
@@ -605,7 +606,6 @@ func getIsuList(c echo.Context) error {
 			LatestIsuCondition: formattedCondition}
 		responseList = append(responseList, res)
 	}
-	latestIsuConditionCacheMutex.RUnlock()
 
 	return c.JSON(http.StatusOK, responseList)
 }
