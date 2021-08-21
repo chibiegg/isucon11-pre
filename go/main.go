@@ -61,14 +61,14 @@ type Config struct {
 }
 
 type Isu struct {
-	ID         int       `db:"id" json:"id"`
-	JIAIsuUUID string    `db:"jia_isu_uuid" json:"jia_isu_uuid"`
-	Name       string    `db:"name" json:"name"`
-	Image      []byte    `db:"image" json:"-"`
-	Character  string    `db:"character" json:"character"`
-	JIAUserID  string    `db:"jia_user_id" json:"-"`
-	CreatedAt  time.Time `db:"created_at" json:"-"`
-	UpdatedAt  time.Time `db:"updated_at" json:"-"`
+	ID         int    `db:"id" json:"id"`
+	JIAIsuUUID string `db:"jia_isu_uuid" json:"jia_isu_uuid"`
+	Name       string `db:"name" json:"name"`
+	// Image      []byte    `db:"image" json:"-"`
+	Character string    `db:"character" json:"character"`
+	JIAUserID string    `db:"jia_user_id" json:"-"`
+	CreatedAt time.Time `db:"created_at" json:"-"`
+	UpdatedAt time.Time `db:"updated_at" json:"-"`
 }
 
 type IsuFromJIA struct {
@@ -709,39 +709,27 @@ func getIsuID(c echo.Context) error {
 // GET /api/isu/:jia_isu_uuid/icon
 // ISUのアイコンを取得
 func getIsuIcon(c echo.Context) error {
-
-	session, err := getSession(c.Request())
+	_, errStatusCode, err := getUserIDFromSession(c)
 	if err != nil {
+		if errStatusCode == http.StatusUnauthorized {
+			return c.String(http.StatusUnauthorized, "you are not signed in")
+		}
+
+		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
-	}
-	_, ok := session.Values["jia_user_id"]
-	if !ok {
-		return c.String(http.StatusUnauthorized, "you are not signed in")
 	}
 
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 
 	var image []byte
 	image, err = ioutil.ReadFile(iconPath + jiaIsuUUID)
+	if err != nil {
+		return c.String(http.StatusNotFound, "not found: isu")
+	}
 	if len(image) == 0 {
 		// default
 		image, err = ioutil.ReadFile(defaultIconFilePath)
 	}
-	if err != nil {
-		return c.String(http.StatusNotFound, "not found: isu")
-	}
-
-	/*
-		err = db.Get(&image, "SELECT `image` FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
-			jiaUserID, jiaIsuUUID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return c.String(http.StatusNotFound, "not found: isu")
-			}
-
-			c.Logger().Errorf("db error: %v", err)
-			return c.NoContent(http.StatusInternalServerError)
-		}*/
 
 	return c.Blob(http.StatusOK, "", image)
 }
