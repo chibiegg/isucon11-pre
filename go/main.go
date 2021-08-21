@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -192,6 +193,23 @@ type PostIsuConditionRequest struct {
 	Condition string `json:"condition"`
 	Message   string `json:"message"`
 	Timestamp int64  `json:"timestamp"`
+}
+
+var isuConditionCacheMutex sync.RWMutex
+var isuConditionCache map[string]IsuCondition = map[string]IsuCondition{}
+
+func insertNewIsuCondition(condition IsuCondition) {
+	isuConditionCacheMutex.Lock()
+	defer isuConditionCacheMutex.Unlock()
+
+	val, ok := isuConditionCache[condition.JIAIsuUUID]
+	if ok {
+		if val.Timestamp.Unix() < condition.Timestamp.Unix() {
+			isuConditionCache[condition.JIAIsuUUID] = condition
+		}
+	} else {
+		isuConditionCache[condition.JIAIsuUUID] = condition
+	}
 }
 
 func (condition *PostIsuConditionRequest) GetConditionFlags() map[string]bool {
@@ -392,6 +410,20 @@ func postInitialize(c echo.Context) error {
 	if err != nil {
 		c.Logger().Errorf("db error : %v", err)
 		return c.NoContent(http.StatusInternalServerError)
+	}
+
+
+
+	isuConditionList := []IsuCondition{}
+	err = db.Select(&isuConditionList,"SELECT * FROM isu_condition")
+	if err != nil {
+		c.Logger().Errorf("db error : %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	isuConditionCache = map[string]IsuCondition{}
+	for _, isuCondition := range isuConditionList {
+		insertNewIsuCondition(isuCondition)
 	}
 
 	return c.JSON(http.StatusOK, InitializeResponse{
@@ -1188,51 +1220,50 @@ func calculateConditionLevel(condition IsuCondition) (int, error) {
 }
 
 type IsuTrend struct {
-	ID             int       `db:"id"`
-	Timestamp      time.Time `db:"timestamp"`
-	Character      string    `db:"character"`
-	ConditionLevel int       `db:"condition_level"`
+	ID             int
+	Timestamp      time.Time
+	Character      string
+	ConditionLevel int
 }
 
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
-	characterList := []Isu{}
-	err := db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
+	isuList := []Isu{}
+	err := db.Select(&isuList, "SELECT `jia_isu_uuid`, `character` FROM `isu`")
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	isuTrendList := []IsuTrend{}
-	err = db.Select(&isuTrendList,
-		"SELECT isu.id, isu.character, ic.timestamp, ic.condition_level "+
-			"FROM ( "+
-			"  SELECT ROW_NUMBER() OVER ( "+
-			"	  PARTITION BY jia_isu_uuid "+
-			"		ORDER BY timestamp DESC "+
-			"	 ) AS rank, "+
-			"	 timestamp, condition_level, jia_isu_uuid "+
-			"	 FROM isu_condition "+
-			") AS ic, isu "+
-			"WHERE ic.rank = 1 AND isu.jia_isu_uuid = ic.jia_isu_uuid")
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
+	isuJIAuuidMap := map[string]Isu{}
+	characterList := map[string]struct{}{}
+	for _, isu := range isuList {
+		isuJIAuuidMap[isu.JIAIsuUUID] = isu
+		characterList[isu.Character] = struct{}{}
 	}
 
-	charaTrendMap := map[string][]IsuTrend{}
-	for _, isuTrend := range isuTrendList {
-		charaTrendMap[isuTrend.Character] = append(charaTrendMap[isuTrend.Character], isuTrend)
+	isuConditionCacheMutex.RLock()
+	charaIsuTrendMap := map[string][]IsuTrend{}
+	for _, isuCondition := range isuConditionCache {
+		correspondingIsu := isuJIAuuidMap[isuCondition.JIAIsuUUID]
+		charaIsuTrendMap[correspondingIsu.Character] = append(charaIsuTrendMap[correspondingIsu.Character],
+			IsuTrend{
+				Character: correspondingIsu.Character,
+				Timestamp: isuCondition.Timestamp,
+				ID: correspondingIsu.ID,
+				ConditionLevel: isuCondition.ConditionLevel,
+			})
 	}
+	defer isuConditionCacheMutex.RUnlock()
 
 	res := []TrendResponse{}
-	for _, character := range characterList {
+	for character,_ := range characterList {
 		characterInfoIsuConditions := []*TrendCondition{}
 		characterWarningIsuConditions := []*TrendCondition{}
 		characterCriticalIsuConditions := []*TrendCondition{}
 
-		for _, isu := range charaTrendMap[character.Character] {
+		for _, isu := range charaIsuTrendMap[character] {
 			trendCondition := TrendCondition{
 				ID:        isu.ID,
 				Timestamp: isu.Timestamp.Unix(),
@@ -1257,7 +1288,7 @@ func getTrend(c echo.Context) error {
 		})
 		res = append(res,
 			TrendResponse{
-				Character: character.Character,
+				Character: character,
 				Info:      characterInfoIsuConditions,
 				Warning:   characterWarningIsuConditions,
 				Critical:  characterCriticalIsuConditions,
@@ -1334,6 +1365,9 @@ func postIsuCondition(c echo.Context) error {
 			c.Logger().Errorf("db error: %v", err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
+
+		// assume that all transaction succeeds
+
 
 	}
 
