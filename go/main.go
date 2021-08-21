@@ -1190,15 +1190,16 @@ func getTrend(c echo.Context) error {
 
 	isuTrendList := []IsuTrend{}
 	err = db.Select(&isuTrendList,
-		"SELECT isu.id, isu.character, b.timestamp, b.condition_level "+
-			"FROM "+
-			"("+
-			"	SELECT max(timestamp) as timestamp, jia_isu_uuid "+
-			"   FROM isu_condition"+
-			"   GROUP BY jia_isu_uuid"+
-			") as a, isu_condition as b, isu "+
-			"WHERE b.timestamp = a.timestamp AND b.jia_isu_uuid = a.jia_isu_uuid AND isu.jia_isu_uuid = b.jia_isu_uuid")
-
+		"SELECT isu.id, isu.character, ic.timestamp, ic.condition_level "+
+			"FROM ( "+
+			"  SELECT ROW_NUMBER() OVER ( "+
+			"	  PARTITION BY jia_isu_uuid "+
+			"		ORDER BY timestamp DESC "+
+			"	 ) AS rank, "+
+			"	 timestamp, condition_level, jia_isu_uuid "+
+			"	 FROM isu_condition "+
+			") AS ic, isu "+
+			"WHERE ic.rank = 1 AND isu.jia_isu_uuid = ic.jia_isu_uuid")
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
