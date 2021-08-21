@@ -560,7 +560,7 @@ func getIsuList(c echo.Context) error {
 	}
 
 	etag := c.Request().Header.Get("If-None-Match")
-	if strings.HasPrefix(etag, "api_isu-") {
+	if strings.HasPrefix(etag, "W/api_isu-") {
 		etags := strings.Split(etag, "-")
 		unixmilliStr := etags[1]
 		unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
@@ -617,7 +617,7 @@ func getIsuList(c echo.Context) error {
 			LatestIsuCondition: formattedCondition}
 		responseList = append(responseList, res)
 	}
-	c.Response().Header().Add("ETag", "api_isu-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
+	c.Response().Header().Add("ETag", "W/api_isu-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
 
 	return c.JSON(http.StatusOK, responseList)
 }
@@ -800,7 +800,7 @@ func getIsuIcon(c echo.Context) error {
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 
 	etag := c.Request().Header.Get("If-None-Match")
-	if etag == jiaUserID+"-"+jiaIsuUUID {
+	if etag == "W/"+jiaUserID+"-"+jiaIsuUUID {
 		c.NoContent(http.StatusNotModified)
 	}
 
@@ -815,7 +815,7 @@ func getIsuIcon(c echo.Context) error {
 		image, err = ioutil.ReadFile(defaultIconFilePath)
 	}
 
-	c.Response().Header().Add("ETag", jiaUserID+"-"+jiaIsuUUID)
+	c.Response().Header().Add("ETag", "W/"+jiaUserID+"-"+jiaIsuUUID)
 	return c.Blob(http.StatusOK, "", image)
 }
 
@@ -835,7 +835,7 @@ func getIsuGraph(c echo.Context) error {
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 
 	etag := c.Request().Header.Get("If-None-Match")
-	if strings.HasPrefix(etag, "api_isu"+jiaIsuUUID+"_graph-") {
+	if strings.HasPrefix(etag, "W/api_isu"+jiaIsuUUID+"_graph-") {
 		etags := strings.Split(etag, "-")
 		unixmilliStr := etags[1]
 		unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
@@ -883,7 +883,7 @@ func getIsuGraph(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	c.Response().Header().Add("ETag", "api_isu"+jiaIsuUUID+"_graph-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
+	c.Response().Header().Add("ETag", "W/api_isu"+jiaIsuUUID+"_graph-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
 
 	return c.JSON(http.StatusOK, res)
 }
@@ -1071,7 +1071,7 @@ func getIsuConditions(c echo.Context) error {
 	}
 
 	etag := c.Request().Header.Get("If-None-Match")
-	if strings.HasPrefix(etag, "api_condition_"+jiaIsuUUID+"-") {
+	if strings.HasPrefix(etag, "W/api_condition_"+jiaIsuUUID+"-") {
 		etags := strings.Split(etag, "-")
 		unixmilliStr := etags[1]
 		unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
@@ -1124,7 +1124,7 @@ func getIsuConditions(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	c.Response().Header().Add("ETag", "api_condition_"+jiaIsuUUID+"-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
+	c.Response().Header().Add("ETag", "W/api_condition_"+jiaIsuUUID+"-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
 	return c.JSON(http.StatusOK, conditionsResponse)
 }
 
@@ -1257,7 +1257,7 @@ func getTrend(c echo.Context) error {
 	isuList := []Isu{}
 
 	etag := c.Request().Header.Get("If-None-Match")
-	if strings.HasPrefix(etag, "api_trend-") {
+	if strings.HasPrefix(etag, "W/api_trend-") {
 		etags := strings.Split(etag, "-")
 		unixmilliStr := etags[1]
 		unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
@@ -1331,7 +1331,7 @@ func getTrend(c echo.Context) error {
 			})
 	}
 
-	c.Response().Header().Add("ETag", "api_trend-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
+	c.Response().Header().Add("ETag", "W/api_trend-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
 	return c.JSON(http.StatusOK, res)
 }
 
