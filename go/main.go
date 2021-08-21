@@ -574,9 +574,7 @@ func getIsuList(c echo.Context) error {
 	}
 	responseList := []GetIsuListResponse{}
 	for _, isu := range isuList {
-		var lastCondition IsuCondition
-
-		_, foundLastCondition := copiedLatestIsuConditionCache[isu.JIAIsuUUID]
+		lastCondition, foundLastCondition := copiedLatestIsuConditionCache[isu.JIAIsuUUID]
 
 		var formattedCondition *GetIsuConditionResponse
 		if foundLastCondition {
@@ -1166,22 +1164,12 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 func calculateConditionLevelStr(condition IsuCondition) (string, error) {
 	var conditionLevel string
 
-	warnCount := 0
-	if condition.IsDirty {
-		warnCount++
-	}
-	if condition.IsBroken {
-		warnCount++
-	}
-	if condition.IsOverweight {
-		warnCount++
-	}
-	switch warnCount {
+	switch condition.ConditionLevel {
 	case 0:
 		conditionLevel = conditionLevelInfoStr
-	case 1, 2:
+	case 1:
 		conditionLevel = conditionLevelWarningStr
-	case 3:
+	case 2:
 		conditionLevel = conditionLevelCriticalStr
 	default:
 		return "", fmt.Errorf("unexpected warn count")
