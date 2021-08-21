@@ -1190,7 +1190,7 @@ func getTrend(c echo.Context) error {
 
 	isuTrendList := []IsuTrend{}
 	err = db.Select(&isuTrendList,
-		"SELECT isu.id, isu.character, b.timestamp, b.condition_level"+
+		"SELECT isu.id, isu.character, b.timestamp, b.condition_level "+
 			"FROM "+
 			"("+
 			"	SELECT max(id) as id"+
