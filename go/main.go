@@ -30,6 +30,7 @@ const (
 	sessionName                 = "isucondition_go"
 	conditionLimit              = 20
 	frontendContentsPath        = "../public"
+	iconPath                    = "../public/icons/"
 	jiaJWTSigningKeyPath        = "../ec256-public.pem"
 	defaultIconFilePath         = "../NoImage.jpg"
 	defaultJIAServiceURL        = "http://localhost:5000"
@@ -570,13 +571,7 @@ func postIsu(c echo.Context) error {
 
 	var image []byte
 
-	if useDefaultImage {
-		image, err = ioutil.ReadFile(defaultIconFilePath)
-		if err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-	} else {
+	if !useDefaultImage {
 		file, err := fh.Open()
 		if err != nil {
 			c.Logger().Error(err)
@@ -590,6 +585,10 @@ func postIsu(c echo.Context) error {
 			return c.NoContent(http.StatusInternalServerError)
 		}
 	}
+	// else {
+	// 中身0バイトでファイル作成
+	//}
+	ioutil.WriteFile(iconPath+jiaIsuUUID, image, os.ModePerm)
 
 	tx, err := db.Beginx()
 	if err != nil {
@@ -599,8 +598,8 @@ func postIsu(c echo.Context) error {
 	defer tx.Rollback()
 
 	_, err = tx.Exec("INSERT INTO `isu`"+
-		"	(`jia_isu_uuid`, `name`, `image`, `jia_user_id`) VALUES (?, ?, ?, ?)",
-		jiaIsuUUID, isuName, image, jiaUserID)
+		"	(`jia_isu_uuid`, `name`, `jia_user_id`) VALUES (?, ?, ?, ?)",
+		jiaIsuUUID, isuName, jiaUserID)
 	if err != nil {
 		mysqlErr, ok := err.(*mysql.MySQLError)
 
@@ -710,29 +709,39 @@ func getIsuID(c echo.Context) error {
 // GET /api/isu/:jia_isu_uuid/icon
 // ISUのアイコンを取得
 func getIsuIcon(c echo.Context) error {
-	jiaUserID, errStatusCode, err := getUserIDFromSession(c)
-	if err != nil {
-		if errStatusCode == http.StatusUnauthorized {
-			return c.String(http.StatusUnauthorized, "you are not signed in")
-		}
 
-		c.Logger().Error(err)
+	session, err := getSession(c.Request())
+	if err != nil {
 		return c.NoContent(http.StatusInternalServerError)
+	}
+	_, ok := session.Values["jia_user_id"]
+	if !ok {
+		return c.String(http.StatusUnauthorized, "you are not signed in")
 	}
 
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 
 	var image []byte
-	err = db.Get(&image, "SELECT `image` FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
-		jiaUserID, jiaIsuUUID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return c.String(http.StatusNotFound, "not found: isu")
-		}
-
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
+	image, err = ioutil.ReadFile(iconPath + jiaIsuUUID)
+	if len(image) == 0 {
+		// default
+		image, err = ioutil.ReadFile(defaultIconFilePath)
 	}
+	if err != nil {
+		return c.String(http.StatusNotFound, "not found: isu")
+	}
+
+	/*
+		err = db.Get(&image, "SELECT `image` FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
+			jiaUserID, jiaIsuUUID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return c.String(http.StatusNotFound, "not found: isu")
+			}
+
+			c.Logger().Errorf("db error: %v", err)
+			return c.NoContent(http.StatusInternalServerError)
+		}*/
 
 	return c.Blob(http.StatusOK, "", image)
 }
