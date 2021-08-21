@@ -35,9 +35,12 @@ const (
 	defaultIconFilePath         = "../NoImage.jpg"
 	defaultJIAServiceURL        = "http://localhost:5000"
 	mysqlErrNumDuplicateEntry   = 1062
-	conditionLevelInfo          = "info"
-	conditionLevelWarning       = "warning"
-	conditionLevelCritical      = "critical"
+	conditionLevelInfoStr       = "info"
+	conditionLevelWarningStr    = "warning"
+	conditionLevelCriticalStr   = "critical"
+	conditionLevelInfo          = 0
+	conditionLevelWarning       = 1
+	conditionLevelCritical      = 2
 	scoreConditionLevelInfo     = 3
 	scoreConditionLevelWarning  = 2
 	scoreConditionLevelCritical = 1
@@ -83,13 +86,37 @@ type GetIsuListResponse struct {
 }
 
 type IsuCondition struct {
-	ID         int       `db:"id"`
-	JIAIsuUUID string    `db:"jia_isu_uuid"`
-	Timestamp  time.Time `db:"timestamp"`
-	IsSitting  bool      `db:"is_sitting"`
-	Condition  string    `db:"condition"`
-	Message    string    `db:"message"`
-	CreatedAt  time.Time `db:"created_at"`
+	ID             int       `db:"id"`
+	JIAIsuUUID     string    `db:"jia_isu_uuid"`
+	Timestamp      time.Time `db:"timestamp"`
+	IsSitting      bool      `db:"is_sitting"`
+	Message        string    `db:"message"`
+	CreatedAt      time.Time `db:"created_at"`
+	IsDirty        bool      `db:"is_dirty"`
+	IsOverweight   bool      `db:"is_overweight"`
+	IsBroken       bool      `db:"is_broken"`
+	ConditionLevel int       `db:"condition_level"`
+}
+
+func (c *IsuCondition) GetConditionStr() string {
+	// is_dirty=true,is_overweight=false,is_broken=false
+	ret := ""
+	if c.IsDirty {
+		ret += "is_dirty=true"
+	} else {
+		ret += "is_dirty=false"
+	}
+	if c.IsOverweight {
+		ret += ",is_overweight=true"
+	} else {
+		ret += ",is_overweight=false"
+	}
+	if c.IsBroken {
+		ret += ",is_broken=true"
+	} else {
+		ret += ",is_broken=false"
+	}
+	return ret
 }
 
 type MySQLConnectionEnv struct {
@@ -165,6 +192,19 @@ type PostIsuConditionRequest struct {
 	Condition string `json:"condition"`
 	Message   string `json:"message"`
 	Timestamp int64  `json:"timestamp"`
+}
+
+func (condition *PostIsuConditionRequest) GetConditionFlags() map[string]bool {
+	conditions := map[string]bool{"is_broken": false, "is_dirty": false, "is_overweight": false}
+	for _, condStr := range strings.Split(condition.Condition, ",") {
+		keyValue := strings.Split(condStr, "=")
+
+		conditionName := keyValue[0]
+		if keyValue[1] == "true" {
+			conditions[conditionName] = true
+		}
+	}
+	return conditions
 }
 
 type JIAServiceRequest struct {
@@ -508,18 +548,19 @@ func getIsuList(c echo.Context) error {
 
 		var formattedCondition *GetIsuConditionResponse
 		if foundLastCondition {
-			conditionLevel, err := calculateConditionLevel(lastCondition.Condition)
+			conditionLevel, err := calculateConditionLevelStr(lastCondition)
 			if err != nil {
 				c.Logger().Error(err)
 				return c.NoContent(http.StatusInternalServerError)
 			}
 
+			conditionStr := lastCondition.GetConditionStr()
 			formattedCondition = &GetIsuConditionResponse{
 				JIAIsuUUID:     lastCondition.JIAIsuUUID,
 				IsuName:        isu.Name,
 				Timestamp:      lastCondition.Timestamp.Unix(),
 				IsSitting:      lastCondition.IsSitting,
-				Condition:      lastCondition.Condition,
+				Condition:      conditionStr,
 				ConditionLevel: conditionLevel,
 				Message:        lastCondition.Message,
 			}
@@ -904,18 +945,17 @@ func calculateGraphDataPoint(isuConditions []IsuCondition) (GraphDataPoint, erro
 	for _, condition := range isuConditions {
 		badConditionsCount := 0
 
-		if !isValidConditionFormat(condition.Condition) {
-			return GraphDataPoint{}, fmt.Errorf("invalid condition format")
+		if condition.IsBroken {
+			conditionsCount["is_broken"] += 1
+			badConditionsCount++
 		}
-
-		for _, condStr := range strings.Split(condition.Condition, ",") {
-			keyValue := strings.Split(condStr, "=")
-
-			conditionName := keyValue[0]
-			if keyValue[1] == "true" {
-				conditionsCount[conditionName] += 1
-				badConditionsCount++
-			}
+		if condition.IsDirty {
+			conditionsCount["is_dirty"] += 1
+			badConditionsCount++
+		}
+		if condition.IsOverweight {
+			conditionsCount["is_overweight"] += 1
+			badConditionsCount++
 		}
 
 		if badConditionsCount >= 3 {
@@ -1048,7 +1088,7 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 
 	conditionsResponse := []*GetIsuConditionResponse{}
 	for _, c := range conditions {
-		cLevel, err := calculateConditionLevel(c.Condition)
+		cLevel, err := calculateConditionLevelStr(c)
 		if err != nil {
 			continue
 		}
@@ -1059,7 +1099,7 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 				IsuName:        isuName,
 				Timestamp:      c.Timestamp.Unix(),
 				IsSitting:      c.IsSitting,
-				Condition:      c.Condition,
+				Condition:      c.GetConditionStr(),
 				ConditionLevel: cLevel,
 				Message:        c.Message,
 			}
@@ -1074,11 +1114,48 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 	return conditionsResponse, nil
 }
 
-// ISUのコンディションの文字列からコンディションレベルを計算
-func calculateConditionLevel(condition string) (string, error) {
+// ISUのコンディションの文字列からコンディションレベル文字列を計算
+func calculateConditionLevelStr(condition IsuCondition) (string, error) {
 	var conditionLevel string
 
-	warnCount := strings.Count(condition, "=true")
+	warnCount := 0
+	if condition.IsDirty {
+		warnCount++
+	}
+	if condition.IsBroken {
+		warnCount++
+	}
+	if condition.IsOverweight {
+		warnCount++
+	}
+	switch warnCount {
+	case 0:
+		conditionLevel = conditionLevelInfoStr
+	case 1, 2:
+		conditionLevel = conditionLevelWarningStr
+	case 3:
+		conditionLevel = conditionLevelCriticalStr
+	default:
+		return "", fmt.Errorf("unexpected warn count")
+	}
+
+	return conditionLevel, nil
+}
+
+// ISUのコンディションの文字列からコンディションレベルを計算
+func calculateConditionLevel(condition IsuCondition) (int, error) {
+	var conditionLevel int
+
+	warnCount := 0
+	if condition.IsDirty {
+		warnCount++
+	}
+	if condition.IsBroken {
+		warnCount++
+	}
+	if condition.IsOverweight {
+		warnCount++
+	}
 	switch warnCount {
 	case 0:
 		conditionLevel = conditionLevelInfo
@@ -1087,7 +1164,7 @@ func calculateConditionLevel(condition string) (string, error) {
 	case 3:
 		conditionLevel = conditionLevelCritical
 	default:
-		return "", fmt.Errorf("unexpected warn count")
+		return 0, fmt.Errorf("unexpected warn count")
 	}
 
 	return conditionLevel, nil
@@ -1132,7 +1209,7 @@ func getTrend(c echo.Context) error {
 
 			if len(conditions) > 0 {
 				isuLastCondition := conditions[0]
-				conditionLevel, err := calculateConditionLevel(isuLastCondition.Condition)
+				conditionLevel, err := calculateConditionLevelStr(isuLastCondition)
 				if err != nil {
 					c.Logger().Error(err)
 					return c.NoContent(http.StatusInternalServerError)
@@ -1221,11 +1298,22 @@ func postIsuCondition(c echo.Context) error {
 			return c.String(http.StatusBadRequest, "bad request body")
 		}
 
+		conditionFlags := cond.GetConditionFlags()
+
+		tmpIsuCondition := IsuCondition{
+			IsDirty:      conditionFlags["is_dirty"],
+			IsBroken:     conditionFlags["is_broken"],
+			IsOverweight: conditionFlags["is_overweight"],
+		}
+		conditionLevel, _ := calculateConditionLevel(tmpIsuCondition)
 		_, err = tx.Exec(
 			"INSERT INTO `isu_condition`"+
-				"	(`jia_isu_uuid`, `timestamp`, `is_sitting`, `condition`, `message`)"+
-				"	VALUES (?, ?, ?, ?, ?)",
-			jiaIsuUUID, timestamp, cond.IsSitting, cond.Condition, cond.Message)
+				"	(`jia_isu_uuid`, `timestamp`, `is_sitting`, `is_dirty`, `is_broken`, `is_overweight`, `condition_level`, `message`)"+
+				"	VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			jiaIsuUUID, timestamp, cond.IsSitting,
+			conditionFlags["is_dirty"], conditionFlags["is_broken"], conditionFlags["is_overweight"],
+			conditionLevel,
+			cond.Message)
 		if err != nil {
 			c.Logger().Errorf("db error: %v", err)
 			return c.NoContent(http.StatusInternalServerError)
