@@ -57,6 +57,8 @@ var (
 	initializeUrls []string
 
 	postIsuConditionTargetBaseURL string // JIAへのactivate時に登録する，ISUがconditionを送る先のURL
+	isCacheEnable                 bool   = true
+	mu                            sync.RWMutex
 )
 
 type Config struct {
@@ -267,6 +269,7 @@ func init() {
 }
 
 func main() {
+	mu = sync.RWMutex{}
 
 	initializeUrls = []string{"http://192.168.0.11:3000/initialize", "http://192.168.0.12:3000/initialize", "http://192.168.0.13:3000/initialize"}
 
@@ -559,14 +562,20 @@ func getIsuList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	etag := c.Request().Header.Get("If-None-Match")
-	if strings.HasPrefix(etag, "W/api_isu-") {
-		etags := strings.Split(etag, "-")
-		unixmilliStr := etags[1]
-		unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
-		if unixmilli+500 >= time.Now().UnixNano()/1000/1000 {
-			c.NoContent(http.StatusNotModified)
+	mu.RLock()
+	if isCacheEnable {
+		mu.RUnlock()
+		etag := c.Request().Header.Get("If-None-Match")
+		if strings.HasPrefix(etag, "W/api_isu-") {
+			etags := strings.Split(etag, "-")
+			unixmilliStr := etags[1]
+			unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
+			if unixmilli+500 >= time.Now().UnixNano()/1000/1000 {
+				c.NoContent(http.StatusNotModified)
+			}
 		}
+	} else {
+		mu.RUnlock()
 	}
 
 	latestIsuConditionCacheMutex.RLock()
@@ -618,6 +627,9 @@ func getIsuList(c echo.Context) error {
 		responseList = append(responseList, res)
 	}
 	c.Response().Header().Add("ETag", "W/api_isu-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
+	mu.Lock()
+	isCacheEnable = true
+	mu.Unlock()
 
 	return c.JSON(http.StatusOK, responseList)
 }
@@ -750,6 +762,9 @@ func postIsu(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	mu.Lock()
+	isCacheEnable = false
+	mu.Unlock()
 
 	return c.JSON(http.StatusCreated, isu)
 }
