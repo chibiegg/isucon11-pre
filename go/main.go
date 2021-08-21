@@ -49,6 +49,8 @@ var (
 
 	jiaJWTSigningKey *ecdsa.PublicKey
 
+	initializeUrls []string
+
 	postIsuConditionTargetBaseURL string // JIAへのactivate時に登録する，ISUがconditionを送る先のURL
 )
 
@@ -207,6 +209,9 @@ func init() {
 }
 
 func main() {
+
+	initializeUrls = []string{"http://192.168.0.12:3000/initialize", "http://192.168.0.13:3000/initialize"}
+
 	e := echo.New()
 	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
@@ -310,6 +315,23 @@ func postInitialize(c echo.Context) error {
 	err := c.Bind(&request)
 	if err != nil {
 		return c.String(http.StatusBadRequest, "bad request body")
+	}
+
+	localonlyStr := c.QueryParam("localonly")
+	if localonlyStr != "1" {
+		for _, url := range initializeUrls {
+			url = url + "?localonly=1"
+			resp, err := http.Post(url, "text/plain", nil)
+			if err != nil {
+				c.Logger().Errorf("remote initialize %s error: %v", url, err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 200 {
+				c.Logger().Errorf("remote initialize %s invalid status: %d", url, resp.StatusCode)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+		}
 	}
 
 	cmd := exec.Command("../sql/init.sh")
