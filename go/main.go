@@ -64,7 +64,6 @@ type Isu struct {
 	ID         int       `db:"id" json:"id"`
 	JIAIsuUUID string    `db:"jia_isu_uuid" json:"jia_isu_uuid"`
 	Name       string    `db:"name" json:"name"`
-	Image      []byte    `db:"image" json:"-"`
 	Character  string    `db:"character" json:"character"`
 	JIAUserID  string    `db:"jia_user_id" json:"-"`
 	CreatedAt  time.Time `db:"created_at" json:"-"`
@@ -569,9 +568,6 @@ func postIsu(c echo.Context) error {
 		useDefaultImage = true
 	}
 
-	// var image []byte
-	image := []byte{}
-
 	tx, err := db.Beginx()
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
@@ -580,8 +576,8 @@ func postIsu(c echo.Context) error {
 	defer tx.Rollback()
 
 	_, err = tx.Exec("INSERT INTO `isu`"+
-		"	(`jia_isu_uuid`, `image`, `name`, `jia_user_id`) VALUES (?, ?, ?, ?)",
-		jiaIsuUUID, image, isuName, jiaUserID)
+		"	(`jia_isu_uuid`, `name`, `jia_user_id`) VALUES (?, ?, ?)",
+		jiaIsuUUID, isuName, jiaUserID)
 	if err != nil {
 		mysqlErr, ok := err.(*mysql.MySQLError)
 
@@ -592,6 +588,8 @@ func postIsu(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+
+	var image []byte
 
 	if !useDefaultImage {
 		file, err := fh.Open()
