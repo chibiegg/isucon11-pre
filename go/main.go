@@ -841,7 +841,7 @@ func generateIsuGraphResponse(tx *sqlx.Tx, jiaIsuUUID string, graphDate time.Tim
 	var condition IsuCondition
 
 	rows, err := tx.Queryx("SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ? AND ? <= `timestamp` AND `timestamp` < ? ORDER BY `timestamp` ASC",
-		jiaIsuUUID, graphDate, graphDate.Add(time.Hour * 24))
+		jiaIsuUUID, graphDate, graphDate.Add(time.Hour*24))
 	if err != nil {
 		return nil, fmt.Errorf("db error: %v", err)
 	}
@@ -1171,6 +1171,13 @@ func calculateConditionLevel(condition IsuCondition) (int, error) {
 	return conditionLevel, nil
 }
 
+type IsuTrend struct {
+	ID             int       `db:"id"`
+	Timestamp      time.Time `db:"timestamp"`
+	Character      string    `db:"character"`
+	ConditionLevel int       `db:"condition_level"`
+}
+
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
@@ -1181,54 +1188,45 @@ func getTrend(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
+	isuTrendList := []IsuTrend{}
+	err = db.Select(&isuTrendList,
+		"SELECT isu.id, isu.character, b.timestamp, b.condition_level "+
+			"FROM "+
+			"("+
+			"	SELECT max(id) as id"+
+			"   FROM isu_condition"+
+			"   GROUP BY jia_isu_uuid"+
+			") as a, isu_condition as b, isu "+
+			"WHERE b.id = a.id AND isu.jia_isu_uuid = b.jia_isu_uuid")
+
+	if err != nil {
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	charaTrendMap := map[string][]IsuTrend{}
+	for _, isuTrend := range isuTrendList {
+		charaTrendMap[isuTrend.Character] = append(charaTrendMap[isuTrend.Character], isuTrend)
+	}
+
 	res := []TrendResponse{}
-
 	for _, character := range characterList {
-		isuList := []Isu{}
-		err = db.Select(&isuList,
-			"SELECT * FROM `isu` WHERE `character` = ?",
-			character.Character,
-		)
-		if err != nil {
-			c.Logger().Errorf("db error: %v", err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-
 		characterInfoIsuConditions := []*TrendCondition{}
 		characterWarningIsuConditions := []*TrendCondition{}
 		characterCriticalIsuConditions := []*TrendCondition{}
-		for _, isu := range isuList {
-			conditions := []IsuCondition{}
-			err = db.Select(&conditions,
-				"SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ? ORDER BY timestamp DESC",
-				isu.JIAIsuUUID,
-			)
-			if err != nil {
-				c.Logger().Errorf("db error: %v", err)
-				return c.NoContent(http.StatusInternalServerError)
-			}
 
-			if len(conditions) > 0 {
-				isuLastCondition := conditions[0]
-				conditionLevel, err := calculateConditionLevelStr(isuLastCondition)
-				if err != nil {
-					c.Logger().Error(err)
-					return c.NoContent(http.StatusInternalServerError)
-				}
-				trendCondition := TrendCondition{
-					ID:        isu.ID,
-					Timestamp: isuLastCondition.Timestamp.Unix(),
-				}
-				switch conditionLevel {
-				case "info":
-					characterInfoIsuConditions = append(characterInfoIsuConditions, &trendCondition)
-				case "warning":
-					characterWarningIsuConditions = append(characterWarningIsuConditions, &trendCondition)
-				case "critical":
-					characterCriticalIsuConditions = append(characterCriticalIsuConditions, &trendCondition)
-				}
+		for _, isu := range charaTrendMap[character.Character] {
+			trendCondition := TrendCondition{
+				ID:        isu.ID,
+				Timestamp: isu.Timestamp.Unix(),
 			}
-
+			if isu.ConditionLevel == 0 {
+				characterInfoIsuConditions = append(characterInfoIsuConditions, &trendCondition)
+			} else if isu.ConditionLevel == 1 {
+				characterWarningIsuConditions = append(characterWarningIsuConditions, &trendCondition)
+			} else {
+				characterCriticalIsuConditions = append(characterCriticalIsuConditions, &trendCondition)
+			}
 		}
 
 		sort.Slice(characterInfoIsuConditions, func(i, j int) bool {
