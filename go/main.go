@@ -317,6 +317,11 @@ func main() {
 		return
 	}
 
+	err = initializeCache()
+	if err != nil {
+		e.Logger.Fatalf("error on initializeCache")
+	}
+
 	serverPort := fmt.Sprintf(":%v", getEnv("SERVER_APP_PORT", "3000"))
 	e.Logger.Fatal(e.Start(serverPort))
 }
@@ -367,6 +372,21 @@ func getJIAServiceURL(tx *sqlx.Tx) string {
 	return config.URL
 }
 
+func initializeCache() error {
+	isuConditionList := []IsuCondition{}
+	err := db.Select(&isuConditionList,"SELECT * FROM isu_condition")
+	if err != nil {
+		return err
+	}
+
+	latestIsuConditionCache = map[string]IsuCondition{}
+	for _, isuCondition := range isuConditionList {
+		updateLatestIsuCondition(isuCondition)
+	}
+
+	return nil
+}
+
 // POST /initialize
 // サービスを初期化
 func postInitialize(c echo.Context) error {
@@ -412,16 +432,10 @@ func postInitialize(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	isuConditionList := []IsuCondition{}
-	err = db.Select(&isuConditionList,"SELECT * FROM isu_condition")
+	err = initializeCache()
 	if err != nil {
 		c.Logger().Errorf("db error : %v", err)
 		return c.NoContent(http.StatusInternalServerError)
-	}
-
-	latestIsuConditionCache = map[string]IsuCondition{}
-	for _, isuCondition := range isuConditionList {
-		updateLatestIsuCondition(isuCondition)
 	}
 
 	return c.JSON(http.StatusOK, InitializeResponse{
