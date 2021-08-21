@@ -210,7 +210,7 @@ func init() {
 
 func main() {
 
-	initializeUrls = []string{"http://192.168.0.12/initialize", "http://192.168.0.13/initialize"}
+	initializeUrls = []string{"http://192.168.0.12:3000/initialize", "http://192.168.0.13:3000/initialize"}
 
 	e := echo.New()
 	e.Debug = true
