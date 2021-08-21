@@ -87,11 +87,11 @@ type IsuCondition struct {
 	JIAIsuUUID   string    `db:"jia_isu_uuid"`
 	Timestamp    time.Time `db:"timestamp"`
 	IsSitting    bool      `db:"is_sitting"`
+	Message      string    `db:"message"`
+	CreatedAt    time.Time `db:"created_at"`
 	IsDirty      bool      `db:"is_dirty"`
 	IsOverweight bool      `db:"is_overweight"`
 	IsBroken     bool      `db:"is_broken"`
-	Message      string    `db:"message"`
-	CreatedAt    time.Time `db:"created_at"`
 }
 
 func (c *IsuCondition) GetConditionStr() string {
