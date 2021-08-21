@@ -1067,7 +1067,7 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 	conditions := []IsuCondition{}
 	var err error
 
-	sql := "SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ?"+
+	sql := "SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ?" +
 		"	AND `timestamp` < ?"
 	args := []interface{}{jiaIsuUUID, endTime}
 
@@ -1100,7 +1100,7 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 	sql += "	ORDER BY `timestamp` DESC LIMIT ?"
 	args = append(args, limit)
 
-	err = db.Select(&conditions, sql, args)
+	err = db.Select(&conditions, sql, args...)
 
 	if err != nil {
 		return nil, fmt.Errorf("db error: %v", err)
