@@ -571,6 +571,27 @@ func postIsu(c echo.Context) error {
 
 	var image []byte
 
+	tx, err := db.Beginx()
+	if err != nil {
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec("INSERT INTO `isu`"+
+		"	(`jia_isu_uuid`, `image`, `name`, `jia_user_id`) VALUES (?, ?, ?, ?, ?)",
+		jiaIsuUUID, image, isuName, jiaUserID)
+	if err != nil {
+		mysqlErr, ok := err.(*mysql.MySQLError)
+
+		if ok && mysqlErr.Number == uint16(mysqlErrNumDuplicateEntry) {
+			return c.String(http.StatusConflict, "duplicated: isu")
+		}
+
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+
 	if !useDefaultImage {
 		file, err := fh.Open()
 		if err != nil {
@@ -589,27 +610,6 @@ func postIsu(c echo.Context) error {
 	// 中身0バイトでファイル作成
 	//}
 	ioutil.WriteFile(iconPath+jiaIsuUUID, image, os.ModePerm)
-
-	tx, err := db.Beginx()
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	defer tx.Rollback()
-
-	_, err = tx.Exec("INSERT INTO `isu`"+
-		"	(`jia_isu_uuid`, `name`, `jia_user_id`) VALUES (?, ?, ?, ?)",
-		jiaIsuUUID, isuName, jiaUserID)
-	if err != nil {
-		mysqlErr, ok := err.(*mysql.MySQLError)
-
-		if ok && mysqlErr.Number == uint16(mysqlErrNumDuplicateEntry) {
-			return c.String(http.StatusConflict, "duplicated: isu")
-		}
-
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
 
 	targetURL := getJIAServiceURL(tx) + "/api/activate"
 	body := JIAServiceRequest{postIsuConditionTargetBaseURL, jiaIsuUUID}
