@@ -35,9 +35,12 @@ const (
 	defaultIconFilePath         = "../NoImage.jpg"
 	defaultJIAServiceURL        = "http://localhost:5000"
 	mysqlErrNumDuplicateEntry   = 1062
-	conditionLevelInfo          = "info"
-	conditionLevelWarning       = "warning"
-	conditionLevelCritical      = "critical"
+	conditionLevelInfoStr       = "info"
+	conditionLevelWarningStr    = "warning"
+	conditionLevelCriticalStr   = "critical"
+	conditionLevelInfo          = 0
+	conditionLevelWarning       = 1
+	conditionLevelCritical      = 2
 	scoreConditionLevelInfo     = 3
 	scoreConditionLevelWarning  = 2
 	scoreConditionLevelCritical = 1
@@ -83,15 +86,16 @@ type GetIsuListResponse struct {
 }
 
 type IsuCondition struct {
-	ID           int       `db:"id"`
-	JIAIsuUUID   string    `db:"jia_isu_uuid"`
-	Timestamp    time.Time `db:"timestamp"`
-	IsSitting    bool      `db:"is_sitting"`
-	Message      string    `db:"message"`
-	CreatedAt    time.Time `db:"created_at"`
-	IsDirty      bool      `db:"is_dirty"`
-	IsOverweight bool      `db:"is_overweight"`
-	IsBroken     bool      `db:"is_broken"`
+	ID             int       `db:"id"`
+	JIAIsuUUID     string    `db:"jia_isu_uuid"`
+	Timestamp      time.Time `db:"timestamp"`
+	IsSitting      bool      `db:"is_sitting"`
+	Message        string    `db:"message"`
+	CreatedAt      time.Time `db:"created_at"`
+	IsDirty        bool      `db:"is_dirty"`
+	IsOverweight   bool      `db:"is_overweight"`
+	IsBroken       bool      `db:"is_broken"`
+	ConditionLevel int       `db:"condition_level"`
 }
 
 func (c *IsuCondition) GetConditionStr() string {
@@ -544,7 +548,7 @@ func getIsuList(c echo.Context) error {
 
 		var formattedCondition *GetIsuConditionResponse
 		if foundLastCondition {
-			conditionLevel, err := calculateConditionLevel(lastCondition)
+			conditionLevel, err := calculateConditionLevelStr(lastCondition)
 			if err != nil {
 				c.Logger().Error(err)
 				return c.NoContent(http.StatusInternalServerError)
@@ -1084,7 +1088,7 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 
 	conditionsResponse := []*GetIsuConditionResponse{}
 	for _, c := range conditions {
-		cLevel, err := calculateConditionLevel(c)
+		cLevel, err := calculateConditionLevelStr(c)
 		if err != nil {
 			continue
 		}
@@ -1110,9 +1114,37 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 	return conditionsResponse, nil
 }
 
-// ISUのコンディションの文字列からコンディションレベルを計算
-func calculateConditionLevel(condition IsuCondition) (string, error) {
+// ISUのコンディションの文字列からコンディションレベル文字列を計算
+func calculateConditionLevelStr(condition IsuCondition) (string, error) {
 	var conditionLevel string
+
+	warnCount := 0
+	if condition.IsDirty {
+		warnCount++
+	}
+	if condition.IsBroken {
+		warnCount++
+	}
+	if condition.IsOverweight {
+		warnCount++
+	}
+	switch warnCount {
+	case 0:
+		conditionLevel = conditionLevelInfoStr
+	case 1, 2:
+		conditionLevel = conditionLevelWarningStr
+	case 3:
+		conditionLevel = conditionLevelCriticalStr
+	default:
+		return "", fmt.Errorf("unexpected warn count")
+	}
+
+	return conditionLevel, nil
+}
+
+// ISUのコンディションの文字列からコンディションレベルを計算
+func calculateConditionLevel(condition IsuCondition) (int, error) {
+	var conditionLevel int
 
 	warnCount := 0
 	if condition.IsDirty {
@@ -1177,7 +1209,7 @@ func getTrend(c echo.Context) error {
 
 			if len(conditions) > 0 {
 				isuLastCondition := conditions[0]
-				conditionLevel, err := calculateConditionLevel(isuLastCondition)
+				conditionLevel, err := calculateConditionLevelStr(isuLastCondition)
 				if err != nil {
 					c.Logger().Error(err)
 					return c.NoContent(http.StatusInternalServerError)
@@ -1267,12 +1299,20 @@ func postIsuCondition(c echo.Context) error {
 		}
 
 		conditionFlags := cond.GetConditionFlags()
+
+		tmpIsuCondition := IsuCondition{
+			IsDirty:      conditionFlags["is_dirty"],
+			IsBroken:     conditionFlags["is_broken"],
+			IsOverweight: conditionFlags["is_overweight"],
+		}
+		conditionLevel, _ := calculateConditionLevel(tmpIsuCondition)
 		_, err = tx.Exec(
 			"INSERT INTO `isu_condition`"+
-				"	(`jia_isu_uuid`, `timestamp`, `is_sitting`, `is_dirty`, `is_broken`, `is_overweight`, `message`)"+
-				"	VALUES (?, ?, ?, ?, ?)",
+				"	(`jia_isu_uuid`, `timestamp`, `is_sitting`, `is_dirty`, `is_broken`, `is_overweight`, `condition_level`, `message`)"+
+				"	VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 			jiaIsuUUID, timestamp, cond.IsSitting,
 			conditionFlags["is_dirty"], conditionFlags["is_broken"], conditionFlags["is_overweight"],
+			conditionLevel,
 			cond.Message)
 		if err != nil {
 			c.Logger().Errorf("db error: %v", err)

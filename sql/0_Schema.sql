@@ -24,6 +24,7 @@ CREATE TABLE `isu_condition` (
   `is_broken` TINYINT(1) NOT NULL,
   `is_dirty` TINYINT(1) NOT NULL,
   `is_overweight` TINYINT(1) NOT NULL,
+  `condition_level` INT NOT NULL,
   PRIMARY KEY(`id`)
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4;
 
