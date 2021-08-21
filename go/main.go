@@ -1191,12 +1191,12 @@ func getTrend(c echo.Context) error {
 	isuTrendList := []IsuTrend{}
 	err = db.Select(&isuTrendList,
 		"SELECT isu.id, isu.character, b.timestamp, b.condition_level"+
-			"FROM"+
+			"FROM "+
 			"("+
 			"	SELECT max(id) as id"+
-			"FROM isu_condition"+
-			"GROUP BY jia_isu_uuid"+
-			") as a, isu_condition as b, isu"+
+			"   FROM isu_condition"+
+			"   GROUP BY jia_isu_uuid"+
+			") as a, isu_condition as b, isu "+
 			"WHERE b.id = a.id AND isu.jia_isu_uuid = b.jia_isu_uuid")
 
 	if err != nil {
