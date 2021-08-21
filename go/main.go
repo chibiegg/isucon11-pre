@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -56,6 +57,9 @@ var (
 	initializeUrls []string
 
 	postIsuConditionTargetBaseURL string // JIAへのactivate時に登録する，ISUがconditionを送る先のURL
+
+	cachedTrendMutex *sync.RWMutex
+	cachedTrend      []byte
 )
 
 type Config struct {
@@ -246,12 +250,11 @@ func init() {
 	if err != nil {
 		log.Fatalf("failed to parse ECDSA public key: %v", err)
 	}
+	cachedTrendMutex = &sync.RWMutex{}
+	initializeUrls = []string{"http://192.168.0.12:3000/initialize", "http://192.168.0.13:3000/initialize"}
 }
 
 func main() {
-
-	initializeUrls = []string{"http://192.168.0.12:3000/initialize", "http://192.168.0.13:3000/initialize"}
-
 	e := echo.New()
 	e.Debug = true
 	e.Logger.SetLevel(log.ERROR)
@@ -297,6 +300,21 @@ func main() {
 		e.Logger.Fatalf("missing: POST_ISUCONDITION_TARGET_BASE_URL")
 		return
 	}
+
+	err = updateTrendCache()
+	if err != nil {
+		e.Logger.Fatal(err)
+	}
+
+	go func() {
+		for {
+			<-time.After(1 * time.Second)
+			err = updateTrendCache()
+			if err != nil {
+				e.Logger.Error(err)
+			}
+		}
+	}()
 
 	serverPort := fmt.Sprintf(":%v", getEnv("SERVER_APP_PORT", "3000"))
 	e.Logger.Fatal(e.Start(serverPort))
@@ -390,6 +408,12 @@ func postInitialize(c echo.Context) error {
 	)
 	if err != nil {
 		c.Logger().Errorf("db error : %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	err = updateTrendCache()
+	if err != nil {
+		c.Logger().Errorf("updateTrendCache error : %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
@@ -1193,14 +1217,12 @@ type IsuTrend struct {
 	ConditionLevel int       `db:"condition_level"`
 }
 
-// GET /api/trend
-// ISUの性格毎の最新のコンディション情報
-func getTrend(c echo.Context) error {
+func updateTrendCache() error {
 	characterList := []Isu{}
 	err := db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
 	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
+		log.Errorf("db error: %v", err)
+		return err
 	}
 
 	isuTrendList := []IsuTrend{}
@@ -1216,8 +1238,8 @@ func getTrend(c echo.Context) error {
 			") AS ic, isu "+
 			"WHERE ic.rank = 1 AND isu.jia_isu_uuid = ic.jia_isu_uuid")
 	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
+		log.Errorf("db error: %v", err)
+		return err
 	}
 
 	charaTrendMap := map[string][]IsuTrend{}
@@ -1263,7 +1285,25 @@ func getTrend(c echo.Context) error {
 			})
 	}
 
-	return c.JSON(http.StatusOK, res)
+	resp, err := json.Marshal(&res)
+	if err != nil {
+		return err
+	}
+
+	cachedTrendMutex.Lock()
+	cachedTrend = resp
+	cachedTrendMutex.Unlock()
+	return nil
+}
+
+// GET /api/trend
+// ISUの性格毎の最新のコンディション情報
+func getTrend(c echo.Context) error {
+	cachedTrendMutex.RLock()
+	resp := cachedTrend
+	cachedTrendMutex.RUnlock()
+
+	return c.Blob(http.StatusOK, "application/json", resp)
 }
 
 // POST /api/condition/:jia_isu_uuid
