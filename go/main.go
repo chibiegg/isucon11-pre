@@ -1071,7 +1071,7 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 		"	AND `timestamp` < ?"
 	args := []interface{}{jiaIsuUUID, endTime}
 
-	if startTime.IsZero() {
+	if !startTime.IsZero() {
 		sql += "	AND ? <= `timestamp`"
 		args = append(args, startTime)
 	}
