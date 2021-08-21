@@ -44,8 +44,14 @@ bind-address            = 0.0.0.0
 #
 # * Query Cache Configuration
 #
-#query_cache_limit      = 1M
-query_cache_size        = 16M
+query_cache_limit      = 16M
+query_cache_size        = 128M
+
+innodb_file_per_table=ON
+innodb_buffer_pool_size = 3G
+innodb_log_file_size=768M
+
+innodb_flush_log_at_trx_commit = 2
 
 #
 # * Logging and Replication
@@ -131,4 +137,3 @@ collation-server      = utf8mb4_general_ci
 # If you use the same .cnf file for MariaDB of different versions,
 # use this group for options that older servers don't understand
 [mariadb-10.3]
-
