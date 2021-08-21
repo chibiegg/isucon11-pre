@@ -268,7 +268,7 @@ func init() {
 
 func main() {
 
-	initializeUrls = []string{"http://192.168.0.11:3000/initialize","http://192.168.0.12:3000/initialize", "http://192.168.0.13:3000/initialize"}
+	initializeUrls = []string{"http://192.168.0.11:3000/initialize", "http://192.168.0.12:3000/initialize", "http://192.168.0.13:3000/initialize"}
 
 	e := echo.New()
 	e.Debug = false
@@ -374,7 +374,7 @@ func getJIAServiceURL(tx *sqlx.Tx) string {
 
 func initializeCache() error {
 	isuConditionList := []IsuCondition{}
-	err := db.Select(&isuConditionList,"SELECT * FROM isu_condition")
+	err := db.Select(&isuConditionList, "SELECT * FROM isu_condition")
 	if err != nil {
 		return err
 	}
@@ -806,6 +806,11 @@ func getIsuIcon(c echo.Context) error {
 
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 
+	etag := c.Request().Header.Get("If-None-Match")
+	if etag == jiaUserID+"-"+jiaIsuUUID {
+		c.NoContent(http.StatusNotModified)
+	}
+
 	// var image []byte
 	image := []byte{}
 	image, err = ioutil.ReadFile(iconPath + jiaUserID + "-" + jiaIsuUUID)
@@ -817,6 +822,7 @@ func getIsuIcon(c echo.Context) error {
 		image, err = ioutil.ReadFile(defaultIconFilePath)
 	}
 
+	c.Response().Header().Add("ETag", jiaUserID+"-"+jiaIsuUUID)
 	return c.Blob(http.StatusOK, "", image)
 }
 
@@ -1261,16 +1267,16 @@ func getTrend(c echo.Context) error {
 		correspondingIsu := isuJIAuuidMap[isuCondition.JIAIsuUUID]
 		charaIsuTrendMap[correspondingIsu.Character] = append(charaIsuTrendMap[correspondingIsu.Character],
 			IsuTrend{
-				Character: correspondingIsu.Character,
-				Timestamp: isuCondition.Timestamp,
-				ID: correspondingIsu.ID,
+				Character:      correspondingIsu.Character,
+				Timestamp:      isuCondition.Timestamp,
+				ID:             correspondingIsu.ID,
 				ConditionLevel: isuCondition.ConditionLevel,
 			})
 	}
 	latestIsuConditionCacheMutex.RUnlock()
 
 	res := []TrendResponse{}
-	for character,_ := range characterList {
+	for character, _ := range characterList {
 		characterInfoIsuConditions := []*TrendCondition{}
 		characterWarningIsuConditions := []*TrendCondition{}
 		characterCriticalIsuConditions := []*TrendCondition{}
@@ -1375,15 +1381,15 @@ func postIsuCondition(c echo.Context) error {
 			cond.Message)
 
 		updateLatestIsuCondition(IsuCondition{
-			ID: -1,
-			JIAIsuUUID: jiaIsuUUID,
-			Timestamp: timestamp,
-			IsSitting: cond.IsSitting,
-			IsDirty: conditionFlags["is_dirty"],
-			IsBroken: conditionFlags["is_broken"],
-			IsOverweight: conditionFlags["is_overweight"],
+			ID:             -1,
+			JIAIsuUUID:     jiaIsuUUID,
+			Timestamp:      timestamp,
+			IsSitting:      cond.IsSitting,
+			IsDirty:        conditionFlags["is_dirty"],
+			IsBroken:       conditionFlags["is_broken"],
+			IsOverweight:   conditionFlags["is_overweight"],
 			ConditionLevel: conditionLevel,
-			Message: cond.Message,
+			Message:        cond.Message,
 		})
 
 		if err != nil {
@@ -1392,7 +1398,6 @@ func postIsuCondition(c echo.Context) error {
 		}
 
 		// assume that all transaction succeeds
-
 
 	}
 
