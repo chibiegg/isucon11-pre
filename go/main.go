@@ -559,15 +559,15 @@ func getIsuList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	tx, err := db.Beginx()
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
+	latestIsuConditionCacheMutex.RLock()
+	copiedLatestIsuConditionCache := map[string]IsuCondition{}
+	for k,v := range latestIsuConditionCache {
+		copiedLatestIsuConditionCache[k] = v
 	}
-	defer tx.Rollback()
+	latestIsuConditionCacheMutex.RUnlock()
 
 	isuList := []Isu{}
-	err = tx.Select(
+	err = db.Select(
 		&isuList,
 		"SELECT * FROM `isu` WHERE `jia_user_id` = ? ORDER BY `id` DESC",
 		jiaUserID)
@@ -575,21 +575,9 @@ func getIsuList(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-
 	responseList := []GetIsuListResponse{}
 	for _, isu := range isuList {
-		var lastCondition IsuCondition
-		foundLastCondition := true
-		err = tx.Get(&lastCondition, "SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ? ORDER BY `timestamp` DESC LIMIT 1",
-			isu.JIAIsuUUID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				foundLastCondition = false
-			} else {
-				c.Logger().Errorf("db error: %v", err)
-				return c.NoContent(http.StatusInternalServerError)
-			}
-		}
+		lastCondition, foundLastCondition := copiedLatestIsuConditionCache[isu.JIAIsuUUID]
 
 		var formattedCondition *GetIsuConditionResponse
 		if foundLastCondition {
@@ -618,12 +606,6 @@ func getIsuList(c echo.Context) error {
 			Character:          isu.Character,
 			LatestIsuCondition: formattedCondition}
 		responseList = append(responseList, res)
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	return c.JSON(http.StatusOK, responseList)
@@ -1185,22 +1167,12 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 func calculateConditionLevelStr(condition IsuCondition) (string, error) {
 	var conditionLevel string
 
-	warnCount := 0
-	if condition.IsDirty {
-		warnCount++
-	}
-	if condition.IsBroken {
-		warnCount++
-	}
-	if condition.IsOverweight {
-		warnCount++
-	}
-	switch warnCount {
+	switch condition.ConditionLevel {
 	case 0:
 		conditionLevel = conditionLevelInfoStr
-	case 1, 2:
+	case 1:
 		conditionLevel = conditionLevelWarningStr
-	case 3:
+	case 2:
 		conditionLevel = conditionLevelCriticalStr
 	default:
 		return "", fmt.Errorf("unexpected warn count")
