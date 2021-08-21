@@ -1228,7 +1228,7 @@ type IsuTrend struct {
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
 	isuList := []Isu{}
-	err := db.Select(&isuList, "SELECT `jia_isu_uuid`, `character` FROM `isu`")
+	err := db.Select(&isuList, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu`")
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
