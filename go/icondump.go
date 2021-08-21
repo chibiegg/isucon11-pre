@@ -226,18 +226,19 @@ func main() {
 	db.SetMaxOpenConns(10)
 	defer db.Close()
 
-	rows, err := db.Query("SELECT jia_isu_uuid,image FROM isu")
+	rows, err := db.Query("SELECT jia_user_id,jia_isu_uuid,image FROM isu")
 	if err != nil {
 		log.Fatal(err)
 	}
 	var image []byte
 	var jiaIsuUUID string
+	var jiaUserID string
 	for rows.Next() {
-		if err := rows.Scan(&jiaIsuUUID, &image); err != nil {
+		if err := rows.Scan(&jiaUserID, &jiaIsuUUID, &image); err != nil {
 			log.Fatal(err)
 		}
 
-		ioutil.WriteFile(iconPath+jiaIsuUUID, image, os.ModePerm)
+		ioutil.WriteFile(iconPath+jiaUserID+"-"+jiaIsuUUID, image, os.ModePerm)
 	}
 
 }
