@@ -1306,6 +1306,8 @@ func postIsuCondition(c echo.Context) error {
 		return c.String(http.StatusNotFound, "not found: isu")
 	}
 
+	query := "INSERT INTO `isu_condition` (`jia_isu_uuid`, `timestamp`, `is_sitting`, `is_dirty`, `is_broken`, `is_overweight`, `condition_level`, `message`) VALUES "
+	args := []interface{}{}
 	for _, cond := range req {
 		timestamp := time.Unix(cond.Timestamp, 0)
 
@@ -1321,19 +1323,33 @@ func postIsuCondition(c echo.Context) error {
 			IsOverweight: conditionFlags["is_overweight"],
 		}
 		conditionLevel, _ := calculateConditionLevel(tmpIsuCondition)
-		_, err = tx.Exec(
-			"INSERT INTO `isu_condition`"+
-				"	(`jia_isu_uuid`, `timestamp`, `is_sitting`, `is_dirty`, `is_broken`, `is_overweight`, `condition_level`, `message`)"+
-				"	VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-			jiaIsuUUID, timestamp, cond.IsSitting,
-			conditionFlags["is_dirty"], conditionFlags["is_broken"], conditionFlags["is_overweight"],
-			conditionLevel,
-			cond.Message)
-		if err != nil {
-			c.Logger().Errorf("db error: %v", err)
-			return c.NoContent(http.StatusInternalServerError)
+		isSitting := 0
+		if cond.IsSitting {
+			isSitting = 1
+		}
+		isDirty := 0
+		if conditionFlags["is_dirty"] {
+			isDirty = 1
+		}
+		isBroken := 0
+		if conditionFlags["is_broken"] {
+			isBroken = 1
+		}
+		isOverweight := 0
+		if conditionFlags["is_overweight"] {
+			isOverweight = 1
 		}
 
+		query += "(?, ?, ?, ?, ?, ?, ?, ?),"
+		args = append(args, jiaIsuUUID, timestamp, isSitting,
+			isDirty, isBroken, isOverweight,
+			conditionLevel,
+			cond.Message)
+	}
+	tx.Exec(query[:len(query)-1], args...)
+	if err != nil {
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	err = tx.Commit()
