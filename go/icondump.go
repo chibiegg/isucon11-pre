@@ -50,8 +50,6 @@ var (
 
 	jiaJWTSigningKey *ecdsa.PublicKey
 
-	initializeUrls []string
-
 	postIsuConditionTargetBaseURL string // JIAへのactivate時に登録する，ISUがconditionを送る先のURL
 )
 
@@ -210,37 +208,12 @@ func init() {
 }
 
 func main() {
-
-	initializeUrls = []string{"http://192.168.0.12:3000/initialize", "http://192.168.0.13:3000/initialize"}
-
 	e := echo.New()
 	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
-
-	e.POST("/initialize", postInitialize)
-
-	e.POST("/api/auth", postAuthentication)
-	e.POST("/api/signout", postSignout)
-	e.GET("/api/user/me", getMe)
-	e.GET("/api/isu", getIsuList)
-	e.POST("/api/isu", postIsu)
-	e.GET("/api/isu/:jia_isu_uuid", getIsuID)
-	e.GET("/api/isu/:jia_isu_uuid/icon", getIsuIcon)
-	e.GET("/api/isu/:jia_isu_uuid/graph", getIsuGraph)
-	e.GET("/api/condition/:jia_isu_uuid", getIsuConditions)
-	e.GET("/api/trend", getTrend)
-
-	e.POST("/api/condition/:jia_isu_uuid", postIsuCondition)
-
-	e.GET("/", getIndex)
-	e.GET("/isu/:jia_isu_uuid", getIndex)
-	e.GET("/isu/:jia_isu_uuid/condition", getIndex)
-	e.GET("/isu/:jia_isu_uuid/graph", getIndex)
-	e.GET("/register", getIndex)
-	e.Static("/assets", frontendContentsPath+"/assets")
 
 	mySQLConnectionData = NewMySQLConnectionEnv()
 
@@ -253,14 +226,21 @@ func main() {
 	db.SetMaxOpenConns(10)
 	defer db.Close()
 
-	postIsuConditionTargetBaseURL = os.Getenv("POST_ISUCONDITION_TARGET_BASE_URL")
-	if postIsuConditionTargetBaseURL == "" {
-		e.Logger.Fatalf("missing: POST_ISUCONDITION_TARGET_BASE_URL")
-		return
+	rows, err := db.Query("SELECT jia_user_id,jia_isu_uuid,image FROM isu")
+	if err != nil {
+		log.Fatal(err)
+	}
+	var image []byte
+	var jiaIsuUUID string
+	var jiaUserID string
+	for rows.Next() {
+		if err := rows.Scan(&jiaUserID, &jiaIsuUUID, &image); err != nil {
+			log.Fatal(err)
+		}
+
+		ioutil.WriteFile(iconPath+jiaUserID+"-"+jiaIsuUUID, image, os.ModePerm)
 	}
 
-	serverPort := fmt.Sprintf(":%v", getEnv("SERVER_APP_PORT", "3000"))
-	e.Logger.Fatal(e.Start(serverPort))
 }
 
 func getSession(r *http.Request) (*sessions.Session, error) {
@@ -316,23 +296,6 @@ func postInitialize(c echo.Context) error {
 	err := c.Bind(&request)
 	if err != nil {
 		return c.String(http.StatusBadRequest, "bad request body")
-	}
-
-	localonlyStr := c.QueryParam("localonly")
-	if localonlyStr != "1" {
-		for _, url := range initializeUrls {
-			url = url + "?localonly=1"
-			resp, err := http.Post(url, "text/plain", nil)
-			if err != nil {
-				c.Logger().Errorf("remote initialize %s error: %v", url, err)
-				return c.NoContent(http.StatusInternalServerError)
-			}
-			defer resp.Body.Close()
-			if resp.StatusCode != 200 {
-				c.Logger().Errorf("remote initialize %s invalid status: %d", url, resp.StatusCode)
-				return c.NoContent(http.StatusInternalServerError)
-			}
-		}
 	}
 
 	cmd := exec.Command("../sql/init.sh")
@@ -569,29 +532,7 @@ func postIsu(c echo.Context) error {
 		useDefaultImage = true
 	}
 
-	// var image []byte
-	image := []byte{}
-
-	tx, err := db.Beginx()
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	defer tx.Rollback()
-
-	_, err = tx.Exec("INSERT INTO `isu`"+
-		"	(`jia_isu_uuid`, `image`, `name`, `jia_user_id`) VALUES (?, ?, ?, ?)",
-		jiaIsuUUID, image, isuName, jiaUserID)
-	if err != nil {
-		mysqlErr, ok := err.(*mysql.MySQLError)
-
-		if ok && mysqlErr.Number == uint16(mysqlErrNumDuplicateEntry) {
-			return c.String(http.StatusConflict, "duplicated: isu")
-		}
-
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
+	var image []byte
 
 	if !useDefaultImage {
 		file, err := fh.Open()
@@ -610,7 +551,28 @@ func postIsu(c echo.Context) error {
 	// else {
 	// 中身0バイトでファイル作成
 	//}
-	ioutil.WriteFile(iconPath+jiaUserID+"-"+jiaIsuUUID, image, os.ModePerm)
+	ioutil.WriteFile(iconPath+jiaIsuUUID, image, os.ModePerm)
+
+	tx, err := db.Beginx()
+	if err != nil {
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec("INSERT INTO `isu`"+
+		"	(`jia_isu_uuid`, `name`, `jia_user_id`) VALUES (?, ?, ?, ?)",
+		jiaIsuUUID, isuName, jiaUserID)
+	if err != nil {
+		mysqlErr, ok := err.(*mysql.MySQLError)
+
+		if ok && mysqlErr.Number == uint16(mysqlErrNumDuplicateEntry) {
+			return c.String(http.StatusConflict, "duplicated: isu")
+		}
+
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
 
 	targetURL := getJIAServiceURL(tx) + "/api/activate"
 	body := JIAServiceRequest{postIsuConditionTargetBaseURL, jiaIsuUUID}
@@ -710,28 +672,39 @@ func getIsuID(c echo.Context) error {
 // GET /api/isu/:jia_isu_uuid/icon
 // ISUのアイコンを取得
 func getIsuIcon(c echo.Context) error {
-	jiaUserID, errStatusCode, err := getUserIDFromSession(c)
-	if err != nil {
-		if errStatusCode == http.StatusUnauthorized {
-			return c.String(http.StatusUnauthorized, "you are not signed in")
-		}
 
-		c.Logger().Error(err)
+	session, err := getSession(c.Request())
+	if err != nil {
 		return c.NoContent(http.StatusInternalServerError)
+	}
+	_, ok := session.Values["jia_user_id"]
+	if !ok {
+		return c.String(http.StatusUnauthorized, "you are not signed in")
 	}
 
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 
-	// var image []byte
-	image := []byte{}
-	image, err = ioutil.ReadFile(iconPath + jiaUserID + "-" + jiaIsuUUID)
-	if err != nil {
-		return c.String(http.StatusNotFound, "not found: isu")
-	}
+	var image []byte
+	image, err = ioutil.ReadFile(iconPath + jiaIsuUUID)
 	if len(image) == 0 {
 		// default
 		image, err = ioutil.ReadFile(defaultIconFilePath)
 	}
+	if err != nil {
+		return c.String(http.StatusNotFound, "not found: isu")
+	}
+
+	/*
+		err = db.Get(&image, "SELECT `image` FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
+			jiaUserID, jiaIsuUUID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return c.String(http.StatusNotFound, "not found: isu")
+			}
+
+			c.Logger().Errorf("db error: %v", err)
+			return c.NoContent(http.StatusInternalServerError)
+		}*/
 
 	return c.Blob(http.StatusOK, "", image)
 }
