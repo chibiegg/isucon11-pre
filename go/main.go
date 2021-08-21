@@ -559,9 +559,19 @@ func getIsuList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
+	etag := c.Request().Header.Get("If-None-Match")
+	if strings.HasPrefix(etag, "api_isu-") {
+		etags := strings.Split(etag, "-")
+		unixmilliStr := etags[1]
+		unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
+		if unixmilli+500 >= time.Now().UnixNano()/1000/1000 {
+			c.NoContent(http.StatusNotModified)
+		}
+	}
+
 	latestIsuConditionCacheMutex.RLock()
 	copiedLatestIsuConditionCache := map[string]IsuCondition{}
-	for k,v := range latestIsuConditionCache {
+	for k, v := range latestIsuConditionCache {
 		copiedLatestIsuConditionCache[k] = v
 	}
 	latestIsuConditionCacheMutex.RUnlock()
@@ -607,6 +617,7 @@ func getIsuList(c echo.Context) error {
 			LatestIsuCondition: formattedCondition}
 		responseList = append(responseList, res)
 	}
+	c.Response().Header().Add("ETag", "api_isu-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
 
 	return c.JSON(http.StatusOK, responseList)
 }
@@ -822,6 +833,17 @@ func getIsuGraph(c echo.Context) error {
 	}
 
 	jiaIsuUUID := c.Param("jia_isu_uuid")
+
+	etag := c.Request().Header.Get("If-None-Match")
+	if strings.HasPrefix(etag, "api_isu"+jiaIsuUUID+"_graph-") {
+		etags := strings.Split(etag, "-")
+		unixmilliStr := etags[1]
+		unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
+		if unixmilli+500 >= time.Now().UnixNano()/1000/1000 {
+			c.NoContent(http.StatusNotModified)
+		}
+	}
+
 	datetimeStr := c.QueryParam("datetime")
 	if datetimeStr == "" {
 		return c.String(http.StatusBadRequest, "missing: datetime")
@@ -861,6 +883,7 @@ func getIsuGraph(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	c.Response().Header().Add("ETag", "api_isu"+jiaIsuUUID+"_graph-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
 
 	return c.JSON(http.StatusOK, res)
 }
@@ -1047,6 +1070,16 @@ func getIsuConditions(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "missing: jia_isu_uuid")
 	}
 
+	etag := c.Request().Header.Get("If-None-Match")
+	if strings.HasPrefix(etag, "api_condition_"+jiaIsuUUID+"-") {
+		etags := strings.Split(etag, "-")
+		unixmilliStr := etags[1]
+		unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
+		if unixmilli+500 >= time.Now().UnixNano()/1000/1000 {
+			c.NoContent(http.StatusNotModified)
+		}
+	}
+
 	endTimeInt64, err := strconv.ParseInt(c.QueryParam("end_time"), 10, 64)
 	if err != nil {
 		return c.String(http.StatusBadRequest, "bad format: end_time")
@@ -1090,6 +1123,8 @@ func getIsuConditions(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+
+	c.Response().Header().Add("ETag", "api_condition_"+jiaIsuUUID+"-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
 	return c.JSON(http.StatusOK, conditionsResponse)
 }
 
@@ -1220,6 +1255,17 @@ type IsuTrend struct {
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
 	isuList := []Isu{}
+
+	etag := c.Request().Header.Get("If-None-Match")
+	if strings.HasPrefix(etag, "api_trend-") {
+		etags := strings.Split(etag, "-")
+		unixmilliStr := etags[1]
+		unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
+		if unixmilli+500 >= time.Now().UnixNano()/1000/1000 {
+			c.NoContent(http.StatusNotModified)
+		}
+	}
+
 	err := db.Select(&isuList, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu`")
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
@@ -1285,6 +1331,7 @@ func getTrend(c echo.Context) error {
 			})
 	}
 
+	c.Response().Header().Add("ETag", "api_trend-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
 	return c.JSON(http.StatusOK, res)
 }
 
