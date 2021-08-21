@@ -254,7 +254,8 @@ func main() {
 
 	e := echo.New()
 	e.Debug = false
-	e.Logger.SetLevel(log.ERROR)
+	e.Logger.SetOutput(ioutil.Discard)
+	e.Logger.SetLevel(log.OFF)
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
