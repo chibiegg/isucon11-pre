@@ -57,6 +57,8 @@ var (
 	initializeUrls []string
 
 	postIsuConditionTargetBaseURL string // JIAへのactivate時に登録する，ISUがconditionを送る先のURL
+	isCacheEnable                 map[string]bool
+	mu                            sync.RWMutex
 )
 
 type Config struct {
@@ -267,6 +269,8 @@ func init() {
 }
 
 func main() {
+	mu = sync.RWMutex{}
+	isCacheEnable = map[string]bool{}
 
 	initializeUrls = []string{"http://192.168.0.11:3000/initialize", "http://192.168.0.12:3000/initialize", "http://192.168.0.13:3000/initialize"}
 
@@ -559,9 +563,28 @@ func getIsuList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
+	mu.RLock()
+	if v, ok := isCacheEnable[jiaUserID]; ok {
+		if v {
+
+			mu.RUnlock()
+			etag := c.Request().Header.Get("If-None-Match")
+			if strings.HasPrefix(etag, "W/api_isu-") {
+				etags := strings.Split(etag, "-")
+				unixmilliStr := etags[1]
+				unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
+				if unixmilli+500 >= time.Now().UnixNano()/1000/1000 {
+					c.NoContent(http.StatusNotModified)
+				}
+			}
+		} else {
+			mu.RUnlock()
+		}
+	}
+
 	latestIsuConditionCacheMutex.RLock()
 	copiedLatestIsuConditionCache := map[string]IsuCondition{}
-	for k,v := range latestIsuConditionCache {
+	for k, v := range latestIsuConditionCache {
 		copiedLatestIsuConditionCache[k] = v
 	}
 	latestIsuConditionCacheMutex.RUnlock()
@@ -607,6 +630,10 @@ func getIsuList(c echo.Context) error {
 			LatestIsuCondition: formattedCondition}
 		responseList = append(responseList, res)
 	}
+	c.Response().Header().Add("ETag", "W/api_isu-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
+	mu.Lock()
+	isCacheEnable[jiaUserID] = true
+	mu.Unlock()
 
 	return c.JSON(http.StatusOK, responseList)
 }
@@ -739,6 +766,9 @@ func postIsu(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	mu.Lock()
+	isCacheEnable[jiaUserID] = false
+	mu.Unlock()
 
 	return c.JSON(http.StatusCreated, isu)
 }
@@ -789,7 +819,7 @@ func getIsuIcon(c echo.Context) error {
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 
 	etag := c.Request().Header.Get("If-None-Match")
-	if etag == jiaUserID+"-"+jiaIsuUUID {
+	if etag == "W/"+jiaUserID+"-"+jiaIsuUUID {
 		c.NoContent(http.StatusNotModified)
 	}
 
@@ -804,7 +834,7 @@ func getIsuIcon(c echo.Context) error {
 		image, err = ioutil.ReadFile(defaultIconFilePath)
 	}
 
-	c.Response().Header().Add("ETag", jiaUserID+"-"+jiaIsuUUID)
+	c.Response().Header().Add("ETag", "W/"+jiaUserID+"-"+jiaIsuUUID)
 	return c.Blob(http.StatusOK, "", image)
 }
 
@@ -822,6 +852,17 @@ func getIsuGraph(c echo.Context) error {
 	}
 
 	jiaIsuUUID := c.Param("jia_isu_uuid")
+
+	etag := c.Request().Header.Get("If-None-Match")
+	if strings.HasPrefix(etag, "W/api_isu"+jiaIsuUUID+"_graph-") {
+		etags := strings.Split(etag, "-")
+		unixmilliStr := etags[1]
+		unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
+		if unixmilli+500 >= time.Now().UnixNano()/1000/1000 {
+			c.NoContent(http.StatusNotModified)
+		}
+	}
+
 	datetimeStr := c.QueryParam("datetime")
 	if datetimeStr == "" {
 		return c.String(http.StatusBadRequest, "missing: datetime")
@@ -861,6 +902,7 @@ func getIsuGraph(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	c.Response().Header().Add("ETag", "W/api_isu"+jiaIsuUUID+"_graph-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
 
 	return c.JSON(http.StatusOK, res)
 }
@@ -1047,6 +1089,16 @@ func getIsuConditions(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "missing: jia_isu_uuid")
 	}
 
+	etag := c.Request().Header.Get("If-None-Match")
+	if strings.HasPrefix(etag, "W/api_condition_"+jiaIsuUUID+"-") {
+		etags := strings.Split(etag, "-")
+		unixmilliStr := etags[1]
+		unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
+		if unixmilli+500 >= time.Now().UnixNano()/1000/1000 {
+			c.NoContent(http.StatusNotModified)
+		}
+	}
+
 	endTimeInt64, err := strconv.ParseInt(c.QueryParam("end_time"), 10, 64)
 	if err != nil {
 		return c.String(http.StatusBadRequest, "bad format: end_time")
@@ -1090,6 +1142,8 @@ func getIsuConditions(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+
+	c.Response().Header().Add("ETag", "W/api_condition_"+jiaIsuUUID+"-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
 	return c.JSON(http.StatusOK, conditionsResponse)
 }
 
@@ -1220,6 +1274,17 @@ type IsuTrend struct {
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
 	isuList := []Isu{}
+
+	etag := c.Request().Header.Get("If-None-Match")
+	if strings.HasPrefix(etag, "W/api_trend-") {
+		etags := strings.Split(etag, "-")
+		unixmilliStr := etags[1]
+		unixmilli, _ := strconv.ParseInt(unixmilliStr, 10, 64)
+		if unixmilli+500 >= time.Now().UnixNano()/1000/1000 {
+			c.NoContent(http.StatusNotModified)
+		}
+	}
+
 	err := db.Select(&isuList, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu`")
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
@@ -1285,6 +1350,7 @@ func getTrend(c echo.Context) error {
 			})
 	}
 
+	c.Response().Header().Add("ETag", "W/api_trend-"+strconv.FormatInt(time.Now().UnixNano()/1000/1000, 10))
 	return c.JSON(http.StatusOK, res)
 }
 
